@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Transcribe an audio or video file locally with Apple SpeechAnalyzer.
 
-Stdlib only. Requires macOS 26+, Apple Silicon, ffmpeg, and Swift (Xcode
-Command Line Tools) for the one-time build of the bundled SpeechCLI.
+Stdlib only. Requires macOS 26+, Apple Silicon, and ffmpeg. On first run it
+downloads a small prebuilt SpeechCLI binary from this repo's GitHub Releases
+(sha256-verified). If that fails, or --build-from-source is given, it compiles
+the bundled Swift source instead (needs Xcode Command Line Tools).
 
 Usage:
     python3 transcribe.py <media-file-or-url> [--language en-US] [--out-dir DIR]
@@ -23,12 +25,24 @@ import platform
 import shutil
 import subprocess
 import sys
+import hashlib
+import os
 import tempfile
+import urllib.request
 from pathlib import Path
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 CLI_SRC = SKILL_ROOT / "apple-speech-cli"
-CLI_BIN = CLI_SRC / ".build" / "release" / "SpeechCLI"
+CLI_BUILT = CLI_SRC / ".build" / "release" / "SpeechCLI"
+CLI_DOWNLOADED = SKILL_ROOT / "bin" / "SpeechCLI"
+
+# Prebuilt binary published by scripts/release-cli.sh. Update both on each release.
+CLI_TAG = "cli-v1"
+CLI_SHA256 = "439098fab5bb1368930fd97939d74210e4eefecc0b797d2066ebc5db406c047d"
+CLI_URL = os.environ.get(
+    "TRANSCRIBE_CLI_URL",
+    f"https://github.com/Kilo-Loco/transcribe-skill/releases/download/{CLI_TAG}/SpeechCLI",
+)
 
 
 def die(msg: str) -> None:
@@ -47,16 +61,54 @@ def check_platform() -> None:
         die("ffmpeg not found. Install with: brew install ffmpeg")
 
 
-def ensure_cli() -> Path:
-    if CLI_BIN.exists():
-        return CLI_BIN
+def download_cli() -> Path:
+    """Fetch the prebuilt SpeechCLI, verify its sha256, and make it executable."""
+    print(f"Downloading SpeechCLI ({CLI_TAG}, ~160 KB, one-time)...", file=sys.stderr)
+    CLI_DOWNLOADED.parent.mkdir(parents=True, exist_ok=True)
+    tmp = CLI_DOWNLOADED.with_suffix(".part")
+    with urllib.request.urlopen(CLI_URL, timeout=60) as resp, open(tmp, "wb") as f:
+        shutil.copyfileobj(resp, f)
+    digest = hashlib.sha256(tmp.read_bytes()).hexdigest()
+    if digest != CLI_SHA256:
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(f"sha256 mismatch: expected {CLI_SHA256}, got {digest}")
+    tmp.chmod(0o755)
+    tmp.replace(CLI_DOWNLOADED)
+    # Defensive: strip quarantine if some fetcher set it (urllib does not).
+    subprocess.run(["xattr", "-d", "com.apple.quarantine", str(CLI_DOWNLOADED)], capture_output=True)
+    return CLI_DOWNLOADED
+
+
+def build_cli() -> Path:
+    """Compile the bundled Swift source (requires Xcode Command Line Tools)."""
     if shutil.which("swift") is None:
-        die("Swift toolchain not found. Install Xcode Command Line Tools: xcode-select --install")
-    print("Building SpeechCLI (one-time, ~1 min)...", file=sys.stderr)
+        raise RuntimeError("Swift toolchain not found. Install Xcode Command Line Tools: xcode-select --install")
+    print("Building SpeechCLI from source (one-time, ~1 min)...", file=sys.stderr)
     r = subprocess.run(["swift", "build", "-c", "release"], cwd=CLI_SRC, capture_output=True, text=True)
-    if r.returncode != 0 or not CLI_BIN.exists():
-        die(f"SpeechCLI build failed:\n{r.stderr}")
-    return CLI_BIN
+    if r.returncode != 0 or not CLI_BUILT.exists():
+        raise RuntimeError(f"SpeechCLI build failed:\n{r.stderr[-2000:]}")
+    return CLI_BUILT
+
+
+def ensure_cli(build_from_source: bool = False) -> Path:
+    """Locate SpeechCLI: existing binary, else download prebuilt, else compile."""
+    if build_from_source:
+        return CLI_BUILT if CLI_BUILT.exists() else build_cli()
+    for candidate in (CLI_DOWNLOADED, CLI_BUILT):
+        if candidate.exists():
+            return candidate
+    errors = []
+    try:
+        return download_cli()
+    except Exception as e:  # network down, corporate proxy, bad checksum...
+        errors.append(f"download: {e}")
+    try:
+        return build_cli()
+    except Exception as e:
+        errors.append(f"build: {e}")
+    die("Could not obtain SpeechCLI.\n  " + "\n  ".join(errors) +
+        "\nOptions: check network access to github.com, set TRANSCRIBE_CLI_URL to a mirror, "
+        "or install Xcode Command Line Tools (xcode-select --install) and rerun.")
 
 
 def is_url(s: str) -> bool:
@@ -152,10 +204,12 @@ def main() -> None:
     ap.add_argument("--language", default="en-US", help="BCP-47 locale, e.g. en-US, es-ES (default: en-US)")
     ap.add_argument("--out-dir", help="directory for outputs (default: next to source, or cwd for URLs)")
     ap.add_argument("--keep-download", action="store_true", help="keep the downloaded audio file for URLs")
+    ap.add_argument("--build-from-source", action="store_true",
+                    help="compile the bundled Swift CLI instead of downloading the prebuilt binary")
     args = ap.parse_args()
 
     check_platform()
-    cli = ensure_cli()
+    cli = ensure_cli(build_from_source=args.build_from_source or bool(os.environ.get("TRANSCRIBE_BUILD_FROM_SOURCE")))
 
     downloaded = False
     if is_url(args.file):

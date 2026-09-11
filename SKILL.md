@@ -7,7 +7,7 @@ description: >
   wants an .srt or .txt transcript. Runs ~76x realtime, zero API cost, and
   local files never leave the machine.
 license: MIT
-compatibility: macOS 26+, Apple Silicon, ffmpeg, Xcode Command Line Tools (Swift) for a one-time build. yt-dlp for URLs.
+compatibility: macOS 26+, Apple Silicon, ffmpeg. yt-dlp for URLs. No Xcode needed (prebuilt binary is downloaded on first run).
 ---
 
 # Transcribe
@@ -29,7 +29,11 @@ python3 <skill-root>/scripts/transcribe.py "https://www.youtube.com/watch?v=..."
   (for URLs the default is the current directory, so prefer passing this)
 - `--keep-download` to keep the downloaded audio when the input is a URL
 
-The first run builds the bundled Swift CLI (~1 min). Later runs start instantly.
+The first run downloads a ~160 KB prebuilt SpeechCLI binary from this repo's
+GitHub Releases into `bin/` and verifies its sha256. Later runs start instantly.
+If the download fails (no network, proxy), it falls back to compiling the
+bundled Swift source, which needs Xcode Command Line Tools. Pass
+`--build-from-source` to skip the download and compile deliberately.
 
 ## What it produces
 
@@ -58,11 +62,13 @@ The script fails fast with a specific message for each of these:
 - Not macOS 26+ on Apple Silicon: SpeechAnalyzer is unavailable. Say so; do not
   try to substitute a cloud service without asking.
 - `ffmpeg` missing: `brew install ffmpeg`
-- `swift` missing: `xcode-select --install`
+- Download blocked and `swift` missing: either allow access to github.com,
+  set `TRANSCRIBE_CLI_URL` to an internal mirror of the binary, or install
+  Xcode Command Line Tools (`xcode-select --install`) and rerun.
 - `yt-dlp` missing (URLs only): `brew install yt-dlp`
 - yt-dlp 403 or extractor error: YouTube changed something and yt-dlp is stale.
   Run `brew upgrade yt-dlp` and retry. This is the most common URL failure.
 - SpeechAnalyzer may download a language model on first use for a new locale.
   This needs network once; then it is cached by macOS.
 
-Do not modify `apple-speech-cli/` or rebuild manually. The script handles it.
+Do not modify `apple-speech-cli/`, `bin/`, or rebuild manually. The script handles it.
