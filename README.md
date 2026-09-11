@@ -1,6 +1,6 @@
 # transcribe-skill
 
-A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill that transcribes audio and video **locally** using Apple SpeechAnalyzer on the Neural Engine. About 76x realtime, zero API cost, nothing leaves your Mac.
+A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill that transcribes audio, video, and YouTube links **locally** using Apple SpeechAnalyzer on the Neural Engine. About 76x realtime, zero API cost, nothing leaves your Mac.
 
 Self-contained: no MCP server, no Python packages, no API keys. It bundles a tiny Swift CLI that is built once on first use.
 
@@ -14,6 +14,8 @@ Restart Claude Code (or start a new session). Then just ask:
 
 > transcribe ~/Movies/standup.mp4
 
+> summarize https://www.youtube.com/watch?v=jNQXAC9IVRw
+
 Claude runs the script, reads the transcript, and does whatever you asked with it: clean it up, summarize it, pull quotes, write captions.
 
 ## Requirements
@@ -21,11 +23,13 @@ Claude runs the script, reads the transcript, and does whatever you asked with i
 - macOS 26 or later on Apple Silicon
 - `ffmpeg` — `brew install ffmpeg`
 - Xcode Command Line Tools — `xcode-select --install` (Swift is used once to build the CLI)
+- `yt-dlp` for URLs — `brew install yt-dlp` (keep it updated; YouTube breaks old versions)
 
 ## Use it without Claude
 
 ```bash
 python3 ~/.claude/skills/transcribe/scripts/transcribe.py video.mp4 [--language en-US] [--out-dir DIR]
+python3 ~/.claude/skills/transcribe/scripts/transcribe.py "https://youtu.be/..." --out-dir ~/Downloads
 ```
 
 Outputs `video.txt`, `video.srt` (YouTube-ready captions), and `video.json` (word-level timestamps) next to the source.

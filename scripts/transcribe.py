@@ -5,10 +5,14 @@ Stdlib only. Requires macOS 26+, Apple Silicon, ffmpeg, and Swift (Xcode
 Command Line Tools) for the one-time build of the bundled SpeechCLI.
 
 Usage:
-    python3 transcribe.py <media-file> [--language en-US] [--out-dir DIR]
+    python3 transcribe.py <media-file-or-url> [--language en-US] [--out-dir DIR]
+
+Accepts a local file or a URL (YouTube, Vimeo, anything yt-dlp supports).
+URLs are downloaded as audio with yt-dlp first (brew install yt-dlp).
 
 Writes <name>.txt, <name>.srt and <name>.json next to the source file
-(or into --out-dir) and prints a short JSON summary to stdout.
+(or into --out-dir; for URLs the default is the current directory) and
+prints a short JSON summary to stdout.
 """
 
 from __future__ import annotations
@@ -53,6 +57,39 @@ def ensure_cli() -> Path:
     if r.returncode != 0 or not CLI_BIN.exists():
         die(f"SpeechCLI build failed:\n{r.stderr}")
     return CLI_BIN
+
+
+def is_url(s: str) -> bool:
+    return s.startswith(("http://", "https://"))
+
+
+def download_url(url: str, out_dir: Path) -> Path:
+    """Download the audio track of a URL with yt-dlp. Returns the local file."""
+    if shutil.which("yt-dlp") is None:
+        die("yt-dlp not found (needed for URLs). Install with: brew install yt-dlp")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Downloading audio from {url} ...", file=sys.stderr)
+    r = subprocess.run(
+        [
+            "yt-dlp", "--no-playlist", "-f", "bestaudio/best",
+            "-x", "--audio-format", "m4a",
+            "--restrict-filenames",
+            "-o", str(out_dir / "%(title).120s [%(id)s].%(ext)s"),
+            "--print", "after_move:filepath", "--no-simulate", "--quiet",
+            url,
+        ],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        die(
+            f"yt-dlp failed:\n{r.stderr[-2000:]}\n\n"
+            "YouTube changes often; a 403 or extractor error usually means yt-dlp "
+            "is out of date. Update it and retry: brew upgrade yt-dlp"
+        )
+    path = Path(r.stdout.strip().splitlines()[-1])
+    if not path.exists():
+        die(f"yt-dlp reported {path} but it does not exist")
+    return path
 
 
 def extract_audio(src: Path) -> tuple[Path, bool]:
@@ -111,17 +148,25 @@ def to_txt(segments: list[dict]) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("file", help="audio or video file")
+    ap.add_argument("file", help="audio/video file, or a URL (YouTube etc.)")
     ap.add_argument("--language", default="en-US", help="BCP-47 locale, e.g. en-US, es-ES (default: en-US)")
-    ap.add_argument("--out-dir", help="directory for outputs (default: next to source)")
+    ap.add_argument("--out-dir", help="directory for outputs (default: next to source, or cwd for URLs)")
+    ap.add_argument("--keep-download", action="store_true", help="keep the downloaded audio file for URLs")
     args = ap.parse_args()
-
-    src = Path(args.file).expanduser().resolve()
-    if not src.exists():
-        die(f"file not found: {src}")
 
     check_platform()
     cli = ensure_cli()
+
+    downloaded = False
+    if is_url(args.file):
+        out_dir = Path(args.out_dir).expanduser().resolve() if args.out_dir else Path.cwd()
+        src = download_url(args.file, out_dir)
+        downloaded = True
+    else:
+        src = Path(args.file).expanduser().resolve()
+        if not src.exists():
+            die(f"file not found: {src}")
+        out_dir = Path(args.out_dir).expanduser().resolve() if args.out_dir else src.parent
 
     wav, is_temp = extract_audio(src)
     try:
@@ -135,7 +180,6 @@ def main() -> None:
     data = json.loads(r.stdout)
     segments = data.get("segments", [])
 
-    out_dir = Path(args.out_dir).expanduser().resolve() if args.out_dir else src.parent
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = out_dir / src.stem
     txt_path, srt_path, json_path = stem.with_suffix(".txt"), stem.with_suffix(".srt"), stem.with_suffix(".json")
@@ -145,10 +189,13 @@ def main() -> None:
     srt_path.write_text(to_srt(segments))
     json_path.write_text(json.dumps(data, indent=2))
 
+    if downloaded and not args.keep_download:
+        src.unlink(missing_ok=True)
+
     word_count = sum(len(s.get("words", [])) for s in segments)
     duration = float(data.get("duration") or (segments[-1]["end"] if segments else 0.0))
     print(json.dumps({
-        "source": str(src),
+        "source": args.file,
         "txt": str(txt_path),
         "srt": str(srt_path),
         "json": str(json_path),

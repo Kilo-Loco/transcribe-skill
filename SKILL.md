@@ -3,10 +3,11 @@ name: transcribe
 description: >
   Transcribe any audio or video file locally on a Mac using Apple SpeechAnalyzer
   (Neural Engine). Use when the user asks to transcribe, caption, subtitle, or
-  "understand what is said in" a video/audio file, or wants an .srt or .txt
-  transcript. Runs ~76x realtime, zero API cost, nothing leaves the machine.
+  "understand what is said in" a video/audio file or a YouTube/Vimeo link, or
+  wants an .srt or .txt transcript. Runs ~76x realtime, zero API cost, and
+  local files never leave the machine.
 license: MIT
-compatibility: macOS 26+, Apple Silicon, ffmpeg, Xcode Command Line Tools (Swift) for a one-time build.
+compatibility: macOS 26+, Apple Silicon, ffmpeg, Xcode Command Line Tools (Swift) for a one-time build. yt-dlp for URLs.
 ---
 
 # Transcribe
@@ -17,6 +18,7 @@ Local, on-device transcription. No MCP server, no API key, no pip install.
 
 ```bash
 python3 <skill-root>/scripts/transcribe.py "/absolute/path/to/video.mp4"
+python3 <skill-root>/scripts/transcribe.py "https://www.youtube.com/watch?v=..."
 ```
 
 `<skill-root>` is the directory containing this SKILL.md (typically
@@ -24,6 +26,8 @@ python3 <skill-root>/scripts/transcribe.py "/absolute/path/to/video.mp4"
 
 - `--language es-ES` for a non-English locale (default `en-US`)
 - `--out-dir DIR` to write outputs somewhere other than next to the source
+  (for URLs the default is the current directory, so prefer passing this)
+- `--keep-download` to keep the downloaded audio when the input is a URL
 
 The first run builds the bundled Swift CLI (~1 min). Later runs start instantly.
 
@@ -55,6 +59,9 @@ The script fails fast with a specific message for each of these:
   try to substitute a cloud service without asking.
 - `ffmpeg` missing: `brew install ffmpeg`
 - `swift` missing: `xcode-select --install`
+- `yt-dlp` missing (URLs only): `brew install yt-dlp`
+- yt-dlp 403 or extractor error: YouTube changed something and yt-dlp is stale.
+  Run `brew upgrade yt-dlp` and retry. This is the most common URL failure.
 - SpeechAnalyzer may download a language model on first use for a new locale.
   This needs network once; then it is cached by macOS.
 
