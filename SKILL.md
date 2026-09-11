@@ -14,6 +14,15 @@ compatibility: macOS 26+, Apple Silicon, ffmpeg. yt-dlp for URLs. No Xcode neede
 
 Local, on-device transcription. No MCP server, no API key, no pip install.
 
+## Invocation
+
+Invoked as `/transcribe $ARGUMENTS`.
+
+- If `$ARGUMENTS` is a file path or URL, run the script on it immediately.
+  Extra words after the path are the user's request for what to do with the
+  transcript (e.g. `/transcribe talk.mp4 summarize in 5 bullets`).
+- If `$ARGUMENTS` is empty, ask for a file path or URL. Do not guess a file.
+
 ## Run
 
 ```bash
